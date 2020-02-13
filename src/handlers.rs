@@ -1,0 +1,36 @@
+use hyper::{Body, Response, StatusCode};
+use gotham::state::{FromState, State};
+use gotham::helpers::http::response::create_response;
+use crate::routing::{TextState, QueryStringExtractor};
+
+pub fn search(mut state: State) -> (State, Response<Body>) {
+    let part = QueryStringExtractor::take_from(&mut state).part;
+    let search_result = {
+        let text_state = TextState::borrow_from(&state);
+        match text_state.suffix_tree.lock().unwrap().search(&part[..]) {
+            None => String::from("Not found"),
+            Some(r) => String::from(r)
+        }
+    };
+
+    let res = create_response(
+        &state,
+        StatusCode::OK,
+        mime::TEXT_PLAIN,
+        search_result.into_bytes()
+    );
+    (state, res)
+}
+
+pub fn get_text(state: State) -> (State, Response<Body>) {
+    let text_state = TextState::borrow_from(&state);
+    let text = text_state.text.clone();
+
+    let res = create_response(
+        &state,
+        StatusCode::OK,
+        mime::TEXT_PLAIN,
+        text.into_bytes()
+    );
+    (state, res)
+}
