@@ -7,17 +7,14 @@ pub fn search(mut state: State) -> (State, Response<Body>) {
     let part = QueryStringExtractor::take_from(&mut state).part;
     let search_result = {
         let text_state = TextState::borrow_from(&state);
-        match text_state.suffix_tree.lock().unwrap().search(&part[..]) {
-            None => String::from("Not found"),
-            Some(r) => String::from(r)
-        }
+        text_state.suffix_tree.lock().unwrap().search(&part[..], 30)
     };
 
     let res = create_response(
         &state,
         StatusCode::OK,
-        mime::TEXT_PLAIN,
-        search_result.into_bytes()
+        mime::APPLICATION_JSON,
+        serde_json::to_vec(&search_result).unwrap()
     );
     (state, res)
 }

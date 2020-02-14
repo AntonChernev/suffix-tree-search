@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 gotham = "0.4"
 gotham_derive = "0.4.0"
-askama = "0.8"
 hyper = "0.12"
 mime = "0.3"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

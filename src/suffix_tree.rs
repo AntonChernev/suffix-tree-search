@@ -6,8 +6,8 @@ use std::cmp::min;
 struct Node {
     children: Vec<Edge>,
     slink: Option<Weak<RefCell<Node>>>,
-    is_leaf: bool,
     is_root: bool,
+    leaf_range: (usize, usize),
     id: u32
 }
 
@@ -29,18 +29,33 @@ pub struct SuffixTree {
     original_text: String,
     root: Rc<RefCell<Node>>,
     longest_non_leaf: Infix,
-    id: u32
+    leaf_dists: Vec<u32>,
+    next_node_id: u32
 }
 
 impl Node {
     fn get_slink(&self) -> Rc<RefCell<Node>> {
         self.slink.as_ref().unwrap().upgrade().unwrap()
     }
+
+    fn is_leaf(&self) -> bool {
+        self.children.len() == 0
+    }
+
+    fn new(children: Vec<Edge>, is_root: bool, id: u32) -> Self {
+        Self {
+            children,
+            is_root,
+            slink: None,
+            leaf_range: (0, 0),
+            id
+        }
+    }
 }
 
 impl Display for Node {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let mut d = format!("node -> id = {}, is leaf {}\n", self.id.to_string(), self.is_leaf);
+        let mut d = format!("node -> id = {}\n", self.id.to_string());
         d = format!("{}children:\n", d);
         for child in &self.children {
             d = format!("{}    child -> {}\n", d, child);
@@ -83,13 +98,18 @@ impl SuffixTree {
         for edge in &node.borrow().children {
             if edge.character == character {
                 let mut edge = edge.clone();
-                if edge.node.borrow().is_leaf {
+                if edge.node.borrow().is_leaf() {
                     edge.len = self.text.len() as u32 - edge.from;
                 }
                 return Some(edge);
             }
         }
         None
+    }
+
+    fn new_node(&mut self, children: Vec<Edge>, is_root: bool) -> Rc<RefCell<Node>> {
+        self.next_node_id += 1;
+        Rc::new(RefCell::new(Node::new(children, is_root, self.next_node_id)))
     }
 
     fn update_edge(node: &Rc<RefCell<Node>>, character: u32, new_edge: Edge) {
@@ -201,20 +221,10 @@ impl SuffixTree {
     }
 
     fn add_character(&mut self, character: u32) {
-        // println!("add character {}", character as u8 as char);
-        // println!("suffix {}", self.longest_non_leaf);
         self.text.push(character);
         let mut last_inner_node: Option<Rc<RefCell<Node>>> = None;
         while !self.check_next_char(&self.longest_non_leaf, character) {
-            // println!("suffix {}", self.longest_non_leaf);
-            let new_leaf = Rc::new(RefCell::new(Node {
-                children: vec![],
-                slink: None,
-                is_leaf: true,
-                is_root: false,
-                id: self.id
-            }));
-            self.id += 1;
+            let new_leaf = self.new_node(vec![], false);
             let edge_to_new_leaf = Edge {
                 node: new_leaf,
                 character,
@@ -241,21 +251,17 @@ impl SuffixTree {
                         from: inner_edge.from + infix_len + 1,
                         len: inner_edge.len - infix_len - 1
                     };
-                    let inner_node = Rc::new(RefCell::new(Node {
-                        children: vec![edge_to_new_leaf, inner_edge_end],
-                        slink: None,
-                        is_leaf: false,
-                        is_root: false,
-                        id: self.id
-                    }));
-                    self.id += 1;
+                    let inner_node = self.new_node(
+                        vec![edge_to_new_leaf, inner_edge_end],
+                        false
+                    );
                     let inner_edge_start = Edge {
                         node: inner_node.clone(),
                         character: inner_edge.character,
                         from: inner_edge.from,
                         len: infix_len
                     };
-                    SuffixTree::update_edge(
+                    Self::update_edge(
                         &self.longest_non_leaf.node,
                         inner_edge.character,
                         inner_edge_start
@@ -273,7 +279,6 @@ impl SuffixTree {
             }
             self.longest_non_leaf = self.find_next_suffix(&self.longest_non_leaf)
         }
-        // println!("out of while suffix {}", self.longest_non_leaf);
 
         if let Some(node) = last_inner_node {
             node.borrow_mut().slink = Some(Rc::downgrade(&self.longest_non_leaf.node));
@@ -282,56 +287,73 @@ impl SuffixTree {
     }
 
     pub fn new(text: &str) -> Self {
-        let node = Rc::new(RefCell::new(Node {
-            children: vec![],
-            slink: None,
-            is_leaf: false,
-            is_root: true,
-            id: 1
-        }));
-        let mut suf_tree = SuffixTree {
-            text: Vec::with_capacity(text.len()),
+        let node = Rc::new(RefCell::new(Node::new(vec![], true, 1)));
+        let mut suf_tree = Self {
+            text: Vec::with_capacity(text.len() + 1),
             original_text: String::from(text),
             root: node.clone(),
             longest_non_leaf: Infix {
                 node: node.clone(),
                 rest: None
             },
-            id: 2
+            leaf_dists: vec![],
+            next_node_id: 1
         };
+
         for character in text.chars() {
             suf_tree.add_character(character as u32);   
         }
+        suf_tree.add_character(123_456_789); // to make all sufixes leaves
+
+        suf_tree.index_leaves(suf_tree.root.clone(), 0);
 
         suf_tree
     }
 
-    pub fn search(&self, part: &str) -> Option<&str> {
+    fn index_leaves(&mut self, node: Rc<RefCell<Node>>, dist: u32) {
+        let start = self.leaf_dists.len();
+        if node.borrow().is_leaf() {
+            self.leaf_dists.push(dist);
+        }
+        for child in &node.borrow().children {
+            let child_dist = 1 + if child.node.borrow().is_leaf() {
+                self.text.len() as u32 - child.from
+            } else {
+                child.len
+            };
+            self.index_leaves(child.node.clone(), dist + child_dist);
+        }
+        let end = self.leaf_dists.len();
+        node.borrow_mut().leaf_range = (start, end);
+    }
+
+    pub fn search(&self, part: &str, context_len: u32) -> Vec<String> {
         let mut infix = Infix {
             node: self.root.clone(),
             rest: None
         };
         for character in part.chars() {
-            infix = self.infix_plus_char(&infix, character as u32)?;
+            infix = match self.infix_plus_char(&infix, character as u32) {
+                None => return vec![],
+                Some(r) => r
+            }
         }
 
-        let part_end = match infix.rest {
-            Some((infix_char, len)) => {
+        let mut result: Vec<String> = vec![];
+        let node = match infix.rest {
+            None => infix.node,
+            Some((infix_char, _)) => {
                 let edge = self.get_edge(&infix.node, infix_char).unwrap();
-                edge.from + len
-            },
-            None => {
-                if infix.node.borrow().is_leaf {
-                    self.text.len() as u32
-                } else {
-                    let edge = &infix.node.borrow().children[0];
-                    edge.from - 1
-                }
+                edge.node
             }
         };
-        let from = part_end as usize - part.len();
-        let to = min((part_end + 20) as usize, self.text.len());
-
-        Some(&self.original_text[from..to])
+        let (leaf_start, leaf_end) = node.borrow().leaf_range;
+        let part_len = part.len();
+        for leaf_dist in &self.leaf_dists[leaf_start..leaf_end] {
+            let from = self.text.len() - *leaf_dist as usize;
+            let to = min(from + part_len + (context_len as usize), self.text.len() - 1);
+            result.push(String::from(&self.original_text[from..to]));
+        }
+        result
     }
 }
