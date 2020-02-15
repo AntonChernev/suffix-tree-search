@@ -1,17 +1,14 @@
-use std::env;
-use std::fs::read_to_string;
-
 use crate::handlers;
 use crate::suffix_tree::SuffixTree;
 
+use std::env;
+use std::sync::{Arc, Mutex};
 use gotham::handler::assets::FileOptions;
 use gotham::router::Router;
 use gotham::router::builder::*;
 use gotham::middleware::state::StateMiddleware;
 use gotham::pipeline::single::single_pipeline;
 use gotham::pipeline::single_middleware;
-
-use std::sync::{Arc, Mutex};
 
 #[derive(Clone, StateData)]
 pub struct TextState {
@@ -27,14 +24,11 @@ pub struct QueryStringExtractor {
     pub part: String,
 }
 
-pub fn router() -> Router {
-    let mut text_path = env::current_dir().unwrap();
-    text_path.push("text/text.txt");
-    let text = read_to_string(text_path).unwrap();
-    let suffix_tree = SuffixTree::new(&text[..]);
+pub fn router(text: &str) -> Router {
+    let suffix_tree = SuffixTree::new(text);
 
     let text_state = TextState {
-        text,
+        text: String::from(text),
         suffix_tree: Arc::new(Mutex::new(suffix_tree))
     };
     let state_middleware = StateMiddleware::new(text_state);
@@ -56,4 +50,45 @@ pub fn router() -> Router {
                 .build(),
         );
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gotham::test::TestServer;
+    use hyper::{StatusCode};
+
+    #[test]
+    fn test_get_text() {
+        let text = "abcdeзfзgз";
+        let test_server = TestServer::new(router(text)).unwrap();
+        let response = test_server
+            .client()
+            .get("http://localhost/api/text")
+            .perform()
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.read_body().unwrap();
+        let expected_body = text;
+        assert_eq!(&body[..], expected_body.as_bytes());
+    }
+
+    #[test]
+    fn test_search() {
+        let text = "abcdeзfзgз";
+        let test_server = TestServer::new(router(text)).unwrap();
+        let response = test_server
+            .client()
+            .get("http://localhost/api/search?part=f")
+            .perform()
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.read_body().unwrap();
+        let expected_body = serde_json::to_string(&vec![String::from("fзgз")]).unwrap();
+        assert_eq!(&body[..], expected_body.as_bytes());
+    }
 }

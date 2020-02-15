@@ -348,12 +348,89 @@ impl SuffixTree {
             }
         };
         let (leaf_start, leaf_end) = node.borrow().leaf_range;
-        let part_len = part.len();
+        let part_len = part.chars().count();
         for leaf_dist in &self.leaf_dists[leaf_start..leaf_end] {
             let from = self.text.len() - *leaf_dist as usize;
             let to = min(from + part_len + (context_len as usize), self.text.len() - 1);
-            result.push(String::from(&self.original_text[from..to]));
+            let s: String = self.original_text.chars().skip(from).take(to - from).collect();
+            result.push(String::from(s));
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn equal_vectors<T: Eq>(v1: Vec<T>, v2: Vec<T>) -> bool {
+        if v1.len() != v2.len() {
+            return false;
+        }
+        for element in &v2 {
+            if !v1.contains(element) {
+                return false;
+            }
+        }
+        for element in &v1 {
+            if !v2.contains(element) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn test_search_en() {
+        let suffix_tree = SuffixTree::new("abcbc");
+        assert!(equal_vectors(
+            suffix_tree.search("bc", 1),
+            vec![String::from("bc"), String::from("bcb")]
+        ));
+        assert!(equal_vectors(
+            suffix_tree.search("abcbc", 1),
+            vec![String::from("abcbc")]
+        ));
+        assert!(equal_vectors(
+            suffix_tree.search("a", 0),
+            vec![String::from("a")]
+        ));
+        assert!(equal_vectors(
+            suffix_tree.search("", 1),
+            vec![
+                String::from("a"),
+                String::from("b"),
+                String::from("c"),
+                String::from("b"),
+                String::from("c"),
+                String::from("")
+            ]
+        ));
+        assert!(equal_vectors(
+            suffix_tree.search("bcb", 10),
+            vec![String::from("bcbc")]
+        ));
+    }
+
+    #[test]
+    fn test_search_bg() {
+        let suffix_tree = SuffixTree::new("абвбвабб");
+        assert!(equal_vectors(
+            suffix_tree.search("б", 3),
+            vec![
+                String::from("бвбв"),
+                String::from("бваб"),
+                String::from("бб"),
+                String::from("б")
+            ]
+        ));
+        assert!(equal_vectors(
+            suffix_tree.search("ваб", 3),
+            vec![String::from("вабб")]
+        ));
+        assert!(equal_vectors(
+            suffix_tree.search("ббб", 3),
+            vec![]
+        ));
     }
 }
